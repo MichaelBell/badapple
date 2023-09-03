@@ -9,8 +9,6 @@
 
 using namespace pimoroni;
 
-auto_init_mutex(fs_mutex);
-
 FATFS fs;
 FIL fil;
 FIL audio_file;
@@ -20,9 +18,9 @@ DVDisplay display;
 #define NUM_BUFFERS 16
 #define BUFFER_LEN 256
 #define BUFFER_BYTES (BUFFER_LEN*2)
-uint16_t buf[BUFFER_LEN];
-uint write_buf;
-uint read_buf;
+uint16_t buf[NUM_BUFFERS][BUFFER_LEN];
+volatile uint write_buf;
+volatile uint read_buf;
 uint buf_idx;
 
 #define DISPLAY_WIDTH 640
@@ -31,7 +29,7 @@ uint buf_idx;
 #define FRAME_WIDTH 640
 #define FRAME_HEIGHT 480
 
-#define AUDIO_SAMPLES_PER_BUFFER 256
+#define AUDIO_SAMPLES_PER_BUFFER 128
 
 static struct audio_buffer_pool *init_audio() {
 
@@ -69,43 +67,84 @@ static void fill_audio_buffer(audio_buffer_pool *producer_pool) {
     if (!buffer) return;
 
     uint bytes_read;
-    mutex_enter_blocking(&fs_mutex);
+    //mutex_enter_blocking(&fs_mutex);
     fr = f_read(&audio_file, buffer->buffer->bytes, buffer->max_sample_count * 4, &bytes_read);
-    mutex_exit(&fs_mutex);
+    //mutex_exit(&fs_mutex);
     if (fr != FR_OK || bytes_read == 0) {
         printf("Audio read fail\n");
         return;
     }
-    //memset(buffer->buffer, 0, bytes_read);
 
     buffer->sample_count = bytes_read >> 2;
     give_audio_buffer(producer_pool, buffer);
-    printf(".");
+    //printf(".");
 }
 
+static void fill_video_buffer() {
+    uint next_buf_idx = (write_buf + 1) & 0xF;
+    if (next_buf_idx == read_buf) return;
+
+    uint bytes_read;
+    fr = f_read(&fil, buf[write_buf], BUFFER_BYTES, &bytes_read);
+    if (fr != FR_OK) {
+        printf("Failed to read data, error: %d\n", fr);
+        return;
+    }
+
+    write_buf = next_buf_idx;
+}
+
+#define SHORT_BUF_LEN 32
 static bool display_frame() {
+    //uint8_t short_buffer[SHORT_BUF_LEN] alignas(4);
+
     for (int y = 0; y < DISPLAY_HEIGHT; ++y)
     {
         int x = 0;
+        //int short_buf_idx = 0;
+        //int short_buf_x = 0;
         while (x < DISPLAY_WIDTH) {
-            const uint16_t span_len = buf[buf_idx] >> 6;
-            const uint8_t colour = buf[buf_idx] & 0x3C;
+            const uint16_t span_len = buf[read_buf][buf_idx] >> 7;
+            const uint8_t colour = buf[read_buf][buf_idx] & 0x7C;
+
+#if 0
+            if (span_len < 5) {
+                if (short_buf_idx + span_len > SHORT_BUF_LEN) {
+                    display.write_palette_pixel_span({short_buf_x, y}, short_buf_idx, short_buffer);
+                    short_buf_idx = 0;
+                }
+                if (short_buf_idx == 0) short_buf_x = x;
+                for (int i = 0; i < span_len; ++i) {
+                    short_buffer[short_buf_idx++] = colour;
+                }
+            }
+            else {
+                if (short_buf_idx != 0) {
+                    display.write_palette_pixel_span({short_buf_x, y}, short_buf_idx, short_buffer);
+                    short_buf_idx = 0;
+                }
+                display.write_palette_pixel_span({x, y}, span_len, colour);
+            }
+#else
             display.write_palette_pixel_span({x, y}, span_len, colour);
+#endif
+
             x += span_len;
 
             if (++buf_idx == BUFFER_LEN) {
-                uint bytes_read;
-                mutex_enter_blocking(&fs_mutex);
-                fr = f_read(&fil, buf, BUFFER_BYTES, &bytes_read);
-                mutex_exit(&fs_mutex);
-                if (fr != FR_OK) {
-                    printf("Failed to read data, error: %d\n", fr);
-                    return false;
-                }
+                uint next_buf_idx = (read_buf + 1) & 0xF;
+                while (next_buf_idx == write_buf);
+                read_buf = next_buf_idx;
 
                 buf_idx = 0;
             }
         }
+#if 0
+        if (short_buf_idx != 0) {
+            display.write_palette_pixel_span({short_buf_x, y}, short_buf_idx, short_buffer);
+            short_buf_idx = 0;
+        }
+#endif
     }
 
     return true;
@@ -124,7 +163,7 @@ void core1_main() {
         
         while (run_fs) {
             fill_audio_buffer(ap);
-            //fill_video_buffer();
+            fill_video_buffer();
         }
 
         multicore_fifo_push_blocking(0);
@@ -156,8 +195,10 @@ int main() {
     int grey = graphics.create_pen(135, 135, 135);
     int dark_grey = graphics.create_pen(72, 72, 72);
 #else
-    for (int i = 0; i < 8; ++i) {
-        uint8_t col = (i << 1) | (i << 5) | (i >> 2);
+    for (int i = 0; i < 32; ++i) {
+        //uint8_t col = (i << 1) | (i << 5) | (i >> 2);
+        //uint8_t col = i | (i << 4);
+        uint8_t col = (i >> 1) | (i << 3);
         graphics.create_pen(col, col, col);
     }
 #endif
@@ -166,7 +207,7 @@ int main() {
     display.flip();
 
     while (true) {
-        fr = f_open(&fil, "/badapple640x480-8m.bin", FA_READ);
+        fr = f_open(&fil, "/badapple640x480-32m.bin", FA_READ);
         if (fr != FR_OK) {
             printf("Failed to open badapple video, error: %d\n", fr);
             return 0;
@@ -179,11 +220,14 @@ int main() {
         }
 
         uint bytes_read;
-        fr = f_read(&fil, buf, BUFFER_BYTES, &bytes_read);
+        fr = f_read(&fil, buf[0], BUFFER_BYTES, &bytes_read);
         if (fr != FR_OK) {
             printf("Failed to read data, error: %d\n", fr);
             return 0;
         }
+
+        write_buf = 1;
+        read_buf = 0;
         buf_idx = 0;
 
         printf("Audio start\n");
