@@ -19,7 +19,7 @@ jobs:
           - os: ubuntu-20.04
             name: Linux
             cache-key: linux
-            cmake-args: '-DPIMORONI_PICO_PATH=$GITHUB_WORKSPACE/pimoroni-pico -DPICO_SDK_PATH=$GITHUB_WORKSPACE/pico-sdk -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/install'
+            cmake-args: '-DPIMORONI_PICO_PATH=$GITHUB_WORKSPACE/pimoroni-pico -DPIMORONI_PICOVISION_PATH=$GITHUB_WORKSPACE/picovision -DPICO_SDK_PATH=$GITHUB_WORKSPACE/pico-sdk -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/install'
             apt-packages: clang-tidy gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
 
     runs-on: ${{matrix.os}}
@@ -27,6 +27,7 @@ jobs:
     env:
       PICO_SDK_PATH: $GITHUB_WORKSPACE/pico-sdk
       PIMORONI_PICO_LIBS: $GITHUB_WORKSPACE/pimoroni-pico
+      PICOVISION_PATH: $GITHUB_WORKSPACE/picovision
       RELEASE_FILE: ${{github.event.repository.name}}-${{github.event.release.tag_name}}
 
     steps:
@@ -42,6 +43,13 @@ jobs:
         repository: pimoroni/pimoroni-pico
         path: pimoroni-pico
 
+    # Checkout the Picovision Library
+    - name: Checkout PicoVision Library
+      uses: actions/checkout@v2
+      with:
+        repository: pimoroni/picovision
+        path: picovision
+
     # Checkout the Pico SDK
     - name: Checkout Pico SDK
       uses: actions/checkout@v2
@@ -49,6 +57,13 @@ jobs:
         repository: raspberrypi/pico-sdk
         path: pico-sdk
         submodules: true
+
+    # Checkout the Pico Extras
+    - name: Checkout Pico Extras
+      uses: actions/checkout@v2
+      with:
+        repository: raspberrypi/pico-extras
+        path: pico-extras
 
     # Linux deps
     - name: Install deps
