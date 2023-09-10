@@ -7,6 +7,8 @@
 #include "pico/multicore.h"
 #include "pico/sync.h"
 
+#include "hardware/dma.h"
+
 using namespace pimoroni;
 
 FATFS fs;
@@ -47,9 +49,17 @@ static struct audio_buffer_pool *init_audio() {
     struct audio_buffer_pool *producer_pool = audio_new_producer_pool(&producer_format, 8, AUDIO_SAMPLES_PER_BUFFER);
     const struct audio_format *output_format;
 
+    // This is a silly hack around audio i2s not claiming resources.
+    uint8_t audio_channel = dma_claim_unused_channel(true);
+    dma_channel_unclaim(audio_channel);
+    uint8_t audio_sm = pio_claim_unused_sm(pio0, true);
+    pio_sm_unclaim(pio0, audio_sm);
+
     struct audio_i2s_config config = {
             .data_pin = PICO_AUDIO_I2S_DATA_PIN,
-            .clock_pin_base = PICO_AUDIO_I2S_CLOCK_PIN_BASE
+            .clock_pin_base = PICO_AUDIO_I2S_CLOCK_PIN_BASE,
+            .dma_channel = audio_channel,
+            .pio_sm = audio_sm
     };
 
     output_format = audio_i2s_setup(&audio_format, &config);
