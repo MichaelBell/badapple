@@ -189,19 +189,18 @@ int main() {
     multicore_launch_core1(core1_main);
     printf("Init\n");
 
-#if 0
-    int black = graphics.create_pen(0, 0, 0);
-    int white = graphics.create_pen(255, 255, 255);
-    int grey = graphics.create_pen(135, 135, 135);
-    int dark_grey = graphics.create_pen(72, 72, 72);
-#else
-    for (int i = 0; i < 32; ++i) {
-        //uint8_t col = (i << 1) | (i << 5) | (i >> 2);
-        //uint8_t col = i | (i << 4);
-        uint8_t col = (i >> 1) | (i << 3);
+    for (int i = 0; i < 16; ++i) {
+        //uint8_t col = (i << 2) | (i << 5) | (i >> 1);
+        uint8_t col = i | (i << 4);
+        //uint8_t col = (i >> 2) | (i << 3);
         graphics.create_pen(col, col, col);
     }
-#endif
+    for (int i = 1; i < 20; ++i) {
+        if ((i & 3) == 0) continue;
+        uint8_t col = (i >> 4) | (i << 2);
+        graphics.create_pen(col, col, col);
+    }
+
     graphics.set_pen(0);
     graphics.clear();
     display.flip();
