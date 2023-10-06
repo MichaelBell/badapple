@@ -181,7 +181,7 @@ void core1_main() {
 }
 
 int main() {
-    set_sys_clock_khz(200000, true);
+    //set_sys_clock_khz(168000, true);
     stdio_init_all();
 
     sleep_ms(5000);
@@ -192,6 +192,8 @@ int main() {
       printf("Failed to mount SD card, error: %d\n", fr);
       return 0;
     }
+
+    DVDisplay::preinit();
 
     display.init(DISPLAY_WIDTH, DISPLAY_HEIGHT, DVDisplay::MODE_PALETTE, FRAME_WIDTH, FRAME_HEIGHT);
     PicoGraphics_PenDV_P5 graphics(FRAME_WIDTH, FRAME_HEIGHT, display);
