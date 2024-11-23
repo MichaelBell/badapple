@@ -2,6 +2,7 @@
 #include "drivers/st7701/st7701.hpp"
 
 #include "ff.h"
+#include "uzlib.h"
 
 #include "pico/multicore.h"
 #include "pico/sync.h"
@@ -32,21 +33,88 @@ PicoGraphics_PenRGB565* display;
 #define NUM_BUFFERS 16
 #define BUFFER_LEN 1024
 #define BUFFER_BYTES (BUFFER_LEN*2)
-uint16_t buf[NUM_BUFFERS][BUFFER_LEN];
+uint16_t buf[NUM_BUFFERS * BUFFER_LEN];
 volatile uint write_buf;
 volatile uint read_buf;
 uint buf_idx;
 bool data_starve;
 
+uint8_t deflate_buf[BUFFER_BYTES];
+struct uzlib_uncomp deflater;
+
+static int deflate_read_cb(struct uzlib_uncomp *uncomp) {
+    uint bytes_read;
+    fr = f_read(&fil, deflate_buf, BUFFER_BYTES, &bytes_read);
+    if (fr != FR_OK) {
+        printf("Failed to read data, error: %d\n", fr);
+        return -1;
+    }
+    if (bytes_read <= 0) {
+        printf("EOF\n");
+        return -1;
+    }
+
+    //printf("%d\n", bytes_read);
+
+    uncomp->source_limit = deflate_buf + bytes_read;
+    uncomp->source = &deflate_buf[1];
+    return deflate_buf[0];
+}
+
+static void setup_video_decompression() {
+    fr = f_open(&fil, "/badapple480x480-565.bin.gz", FA_READ);
+    if (fr != FR_OK) {
+        printf("Failed to open badapple video, error: %d\n", fr);
+        exit(1);
+    }
+
+    uint bytes_read;
+    fr = f_read(&fil, deflate_buf, BUFFER_BYTES, &bytes_read);
+    if (fr != FR_OK) {
+        printf("Failed to read data, error: %d\n", fr);
+        exit(1);
+    }
+
+    uzlib_uncompress_init(&deflater);
+    deflater.source = deflate_buf;
+    deflater.source_limit = deflate_buf + BUFFER_BYTES;
+    deflater.source_read_cb = &deflate_read_cb;
+
+    int res = uzlib_gzip_parse_header(&deflater);
+    if (res != TINF_OK) {
+        printf("Error parsing header: %d\n", res);
+        exit(1);
+    }
+
+    deflater.dest_start = deflater.dest = (uint8_t*)&buf[0];
+    deflater.dest_limit = deflater.dest_start + BUFFER_BYTES;
+    deflater.dest_ring_start = (uint8_t*)&buf[0];
+    deflater.dest_ring_end = (uint8_t*)&buf[NUM_BUFFERS * BUFFER_LEN];
+
+    res = uzlib_uncompress(&deflater);
+    if (res != TINF_OK) {
+        printf("Error decompressing first block: %d\n", res);
+        exit(1);
+    }
+
+    printf("Here %04x %04x %04x %04x\n", buf[0], buf[1], buf[2], buf[3]);
+
+    write_buf = 0;
+    read_buf = 0;
+}
+
 static void fill_video_buffer() {
     uint next_buf_idx = (write_buf + 1) & 0xF;
     if (next_buf_idx == read_buf) return;
 
-    uint bytes_read;
-    fr = f_read(&fil, buf[write_buf], BUFFER_BYTES, &bytes_read);
-    if (fr != FR_OK) {
-        printf("Failed to read data, error: %d\n", fr);
-        return;
+    //printf("Decomp: %p %p %p %p %p\n", deflater.source, deflater.source_limit, deflater.dest, deflater.dest_ring_end, (uint8_t*)&buf[next_buf_idx * BUFFER_LEN]);
+
+    deflater.dest_start = deflater.dest = (uint8_t*)&buf[next_buf_idx * BUFFER_LEN];
+    deflater.dest_limit = deflater.dest_start + BUFFER_BYTES;
+
+    int res = uzlib_uncompress(&deflater);
+    if (res != TINF_OK && res != TINF_DONE) {
+        printf("Error decompressing block: %d\n", res);
     }
 
     write_buf = next_buf_idx;
@@ -58,10 +126,16 @@ static bool display_frame() {
     {
         int x = 0;
         while (x < FRAME_WIDTH) {
-            uint16_t span_len = buf[read_buf][buf_idx];
-            const uint16_t colour = buf[read_buf][buf_idx+1];
+            uint16_t span_len = buf[read_buf * BUFFER_LEN + buf_idx];
+            const uint16_t colour = buf[read_buf * BUFFER_LEN + buf_idx+1];
             
             x += span_len;
+
+            if (x > FRAME_WIDTH) {
+                printf("Span error\n");
+                span_len -= x - FRAME_WIDTH;
+            }
+
             while (span_len--) *ptr++ = colour;
 
             buf_idx += 2;
@@ -81,21 +155,29 @@ static bool display_frame() {
 volatile bool run_fs = false;
 
 void core1_main() {
+
+    uzlib_init();
+
     presto->init();
 
     while (true) {
         multicore_fifo_pop_blocking();
-        
+        setup_video_decompression();
+        fill_video_buffer();
+        multicore_fifo_push_blocking(0);
+
         while (run_fs) {
             fill_video_buffer();
         }
+
+        f_close(&fil);
 
         multicore_fifo_push_blocking(0);
     }
 }
 
 int main() {
-    set_sys_clock_khz(180000, true);
+    set_sys_clock_khz(240000, true);
     stdio_init_all();
 
     gpio_init(LCD_CS);
@@ -122,25 +204,13 @@ int main() {
     //presto->update(display);
 
     while (true) {
-        fr = f_open(&fil, "/badapple480x480-565.bin", FA_READ);
-        if (fr != FR_OK) {
-            printf("Failed to open badapple video, error: %d\n", fr);
-            return 0;
-        }
-
-        uint bytes_read;
-        fr = f_read(&fil, buf[0], BUFFER_BYTES, &bytes_read);
-        if (fr != FR_OK) {
-            printf("Failed to read data, error: %d\n", fr);
-            return 0;
-        }
-
         write_buf = 1;
         read_buf = 0;
         buf_idx = 0;
 
         run_fs = true;
         multicore_fifo_push_blocking(0);
+        multicore_fifo_pop_blocking();
 
         absolute_time_t start_time = get_absolute_time();
         for (int i = 0; i < 6950; ++i) {
@@ -160,8 +230,5 @@ int main() {
         }
         run_fs = false;
         multicore_fifo_pop_blocking();
-
-        f_close(&fil);
-        f_close(&audio_file);
     }
 }

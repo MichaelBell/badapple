@@ -30,9 +30,19 @@ include_directories(${PIMORONI_PRESTO_PATH})
 list(APPEND CMAKE_MODULE_PATH ${PIMORONI_PRESTO_PATH})
 include(drivers/st7701/st7701_presto)
 
+include_directories(${CMAKE_CURRENT_LIST_DIR}/uzlib/src)
+
 # Add your source files
 add_executable(${NAME}
     main.cpp # <-- Add source files here!
+
+    uzlib/src/tinflate.c
+    uzlib/src/tinfgzip.c
+    uzlib/src/tinfzlib.c
+    uzlib/src/adler32.c
+    uzlib/src/crc32.c
+    uzlib/src/defl_static.c
+    uzlib/src/genlz77.c
 )
 
 # Include required libraries
@@ -51,6 +61,7 @@ target_link_libraries(${NAME}
     pimoroni_i2c
     sdcard
     fatfs
+    hardware_interp
 )
 
 target_compile_definitions(${NAME} PRIVATE

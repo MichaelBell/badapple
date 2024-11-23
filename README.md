@@ -10,8 +10,6 @@ To build the run length encoded video from the extracted frames (this will take 
 
     ./bit_dump32.py
 
-Copy the resulting `badapple480x480-565.bin` to the root directory of an SD card.
-
-To avoid lag, edit `pimoroni-pico/drivers/sdcard/sdcard.c` and increase the `CLK_FAST` to 50MHz.
+Gzip the resulting `badapple480x480-565.bin`, and copy `badapple480x480-565.bin.gz` to the root directory of an SD card.
 
 Build the project in the normal way, flash to the Presto, and enjoy!

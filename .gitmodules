@@ -1,0 +1,3 @@
+[submodule "uzlib"]
+	path = uzlib
+	url = git@github.com:MichaelBell/uzlib.git
