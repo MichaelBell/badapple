@@ -30,12 +30,13 @@ ST7701* presto;
 PicoGraphics_PenRGB565* display;
 
 #define NUM_BUFFERS 16
-#define BUFFER_LEN 256
+#define BUFFER_LEN 1024
 #define BUFFER_BYTES (BUFFER_LEN*2)
 uint16_t buf[NUM_BUFFERS][BUFFER_LEN];
 volatile uint write_buf;
 volatile uint read_buf;
 uint buf_idx;
+bool data_starve;
 
 static void fill_video_buffer() {
     uint next_buf_idx = (write_buf + 1) & 0xF;
@@ -52,21 +53,21 @@ static void fill_video_buffer() {
 }
 
 static bool display_frame() {
+    uint16_t* ptr = frame_buffer;
     for (int y = 0; y < FRAME_HEIGHT; ++y)
     {
         int x = 0;
         while (x < FRAME_WIDTH) {
-            const uint16_t span_len = buf[read_buf][buf_idx];
+            uint16_t span_len = buf[read_buf][buf_idx];
             const uint16_t colour = buf[read_buf][buf_idx+1];
-            display->set_pen(colour);
-            display->set_pixel_span({x, y}, span_len);
-
+            
             x += span_len;
+            while (span_len--) *ptr++ = colour;
 
             buf_idx += 2;
             if (buf_idx == BUFFER_LEN) {
                 uint next_buf_idx = (read_buf + 1) & 0xF;
-                while (next_buf_idx == write_buf);
+                while (next_buf_idx == write_buf) data_starve = true;
                 read_buf = next_buf_idx;
 
                 buf_idx = 0;
@@ -80,6 +81,8 @@ static bool display_frame() {
 volatile bool run_fs = false;
 
 void core1_main() {
+    presto->init();
+
     while (true) {
         multicore_fifo_pop_blocking();
         
@@ -92,7 +95,7 @@ void core1_main() {
 }
 
 int main() {
-    set_sys_clock_khz(240000, true);
+    set_sys_clock_khz(180000, true);
     stdio_init_all();
 
     gpio_init(LCD_CS);
@@ -110,8 +113,6 @@ int main() {
 
     presto = new ST7701(FRAME_WIDTH, FRAME_HEIGHT, ROTATE_0, SPIPins{spi1, LCD_CS, LCD_CLK, LCD_DAT, PIN_UNUSED, LCD_DC, BACKLIGHT}, frame_buffer);
     display = new PicoGraphics_PenRGB565(FRAME_WIDTH, FRAME_HEIGHT, frame_buffer);
-
-    presto->init();
 
     multicore_launch_core1(core1_main);
     printf("Init\n");
@@ -150,9 +151,11 @@ int main() {
                 sleep_until(sleep_to_time);
             }
             else {
-                printf("Frame %d time %lldms\n", i, absolute_time_diff_us(start_time, get_absolute_time()) / 1000);
+                printf("Frame %d time %lldms%s\n", i, absolute_time_diff_us(start_time, get_absolute_time()) / 1000, data_starve ? " (data)" : "");
             }
+            data_starve = false;
             //presto->update(display);
+            presto->wait_for_vsync();
             start_time = delayed_by_ms(start_time, (i % 3 == 2) ? 34 : 33);
         }
         run_fs = false;
