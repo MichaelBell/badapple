@@ -17,7 +17,9 @@ set(CMAKE_CXX_STANDARD 17)
 # Initialize the SDK
 pico_sdk_init()
 
-set(PIMORONI_PRESTO_PATH ../../presto/)
+if (NOT PIMORONI_PRESTO_PATH)
+    set(PIMORONI_PRESTO_PATH ../../presto/)
+endif()
 if(NOT IS_ABSOLUTE ${PIMORONI_PRESTO_PATH})
     get_filename_component(
         PIMORONI_PRESTO_PATH
