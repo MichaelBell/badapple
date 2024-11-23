@@ -1,11 +1,13 @@
 cmake_minimum_required(VERSION 3.12)
 
+set(PICO_PLATFORM rp2350-arm-s)
+set(PICO_BOARD pimoroni_pico_plus2_rp2350)
+
 # Change your executable name to something creative!
 set(NAME badapple) # <-- Name your project/executable here!
 
 include(pimoroni_pico_import.cmake)
 include(pico_sdk_import.cmake)
-include(pico_extras_import.cmake)
 
 # Gooey boilerplate
 project(${NAME} C CXX ASM)
@@ -14,7 +16,19 @@ set(CMAKE_CXX_STANDARD 17)
 
 # Initialize the SDK
 pico_sdk_init()
-include(picovision_import.cmake)
+
+set(PIMORONI_PRESTO_PATH ../../presto/)
+if(NOT IS_ABSOLUTE ${PIMORONI_PRESTO_PATH})
+    get_filename_component(
+        PIMORONI_PRESTO_PATH
+        "${CMAKE_CURRENT_BINARY_DIR}/${PIMORONI_PRESTO_PATH}"
+        ABSOLUTE)
+endif()
+message("PIMORONI_PRESTO_PATH is ${PIMORONI_PRESTO_PATH}")
+set(PIMORONI_PRESTO_PATH ${PIMORONI_PRESTO_PATH} CACHE PATH "Path to the Presto libraries" FORCE)
+include_directories(${PIMORONI_PRESTO_PATH})
+list(APPEND CMAKE_MODULE_PATH ${PIMORONI_PRESTO_PATH})
+include(drivers/st7701/st7701_presto)
 
 # Add your source files
 add_executable(${NAME}
@@ -24,14 +38,15 @@ add_executable(${NAME}
 # Include required libraries
 # This assumes `pimoroni-pico` is stored alongside your project
 include(common/pimoroni_i2c)
+include(common/pimoroni_bus)
 include(drivers/fatfs/fatfs)
 include(drivers/sdcard/sdcard)
+include(libraries/pico_graphics/pico_graphics)
 
 # Don't forget to link the libraries you need!
 target_link_libraries(${NAME}
-    picovision
+    st7701_presto
     pico_stdlib
-    pico_audio_i2s
     pico_multicore
     pimoroni_i2c
     sdcard
@@ -39,13 +54,11 @@ target_link_libraries(${NAME}
 )
 
 target_compile_definitions(${NAME} PRIVATE
-  SDCARD_SPI_BUS=spi1
-  SDCARD_PIN_SPI0_CS=15
-  SDCARD_PIN_SPI0_SCK=10
-  SDCARD_PIN_SPI0_MOSI=11
-  SDCARD_PIN_SPI0_MISO=12
-  PICO_AUDIO_I2S_CLOCK_PIN_BASE=27
-  PICO_AUDIO_I2S_DATA_PIN=26
+  SDCARD_SPI_BUS=spi0
+  SDCARD_PIN_SPI0_CS=39
+  SDCARD_PIN_SPI0_SCK=34
+  SDCARD_PIN_SPI0_MOSI=35
+  SDCARD_PIN_SPI0_MISO=36
   )
 
 
