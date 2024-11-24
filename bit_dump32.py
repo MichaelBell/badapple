@@ -14,18 +14,22 @@ colour_shift_changes = {
     2716: 5,
     2737: 4,
     2916: 5,
-    2957: 3,
+    2957: 2,
+    3305: 3,
     3320: 4
 }
 
 colour_shift = 5
 
 def convert_span_colour(span_colour):
-    if colour_shift == 5:
-        span_colour = (span_colour << 2) | (span_colour >> 1)
-    elif colour_shift == 4:
-        span_colour = (span_colour << 1) | (span_colour >> 3)
-    span_colour = (span_colour << 11) | (span_colour << 6) | span_colour
+    if colour_shift == 2:
+        span_colour = ((span_colour << 10) & 0xF800) | (span_colour << 5) | (span_colour >> 1)
+    else:
+        if colour_shift == 5:
+            span_colour = (span_colour << 2) | (span_colour >> 1)
+        elif colour_shift == 4:
+            span_colour = (span_colour << 1) | (span_colour >> 3)
+        span_colour = (span_colour << 11) | (span_colour << 6) | span_colour
     span_colour = (span_colour & 0xFF) << 8 | ((span_colour >> 8) & 0xFF)  # Stupid byte swap
     return span_colour
 
@@ -42,6 +46,7 @@ for i in range(1,6957):
         span_colour = -255
         for x in range(480):
             colour = data[x, y][0] >> colour_shift
+            if colour_shift == 2 and colour > 0x10: colour &= 0x3E
             if colour != span_colour:
                 if span_len > 0:
                     span_colour = convert_span_colour(span_colour)

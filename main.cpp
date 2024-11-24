@@ -39,7 +39,7 @@ volatile uint read_buf;
 uint buf_idx;
 bool data_starve;
 
-#define AUDIO_BUFFER_LEN 2048
+#define AUDIO_BUFFER_LEN 4096
 uint8_t audio_buf[AUDIO_BUFFER_LEN];
 volatile uint write_audio_buf;
 volatile uint read_audio_buf;
@@ -127,9 +127,9 @@ static void setup_video_decompression() {
     read_buf = 0;
 }
 
-static void fill_video_buffer() {
-    uint next_buf_idx = (write_buf + 1) & 0xF;
-    if (next_buf_idx == read_buf) return;
+static bool fill_video_buffer() {
+    uint next_buf_idx = (write_buf + 1) & (NUM_BUFFERS - 1);
+    if (next_buf_idx == read_buf) return false;
 
     //printf("Decomp: %p %p %p %p %p\n", deflater.source, deflater.source_limit, deflater.dest, deflater.dest_ring_end, (uint8_t*)&buf[next_buf_idx * BUFFER_LEN]);
 
@@ -143,6 +143,8 @@ static void fill_video_buffer() {
 
     write_buf = next_buf_idx;
     //printf("%01x", write_buf);
+
+    return true;
 }
 
 static void fill_audio_buffer() {
@@ -164,7 +166,7 @@ static void fill_audio_buffer() {
 
     write_audio_buf = (write_audio_buf + bytes_read) & (AUDIO_BUFFER_LEN - 1);
 
-    if (bytes_read > 200) {
+    if (bytes_read > 2000) {
         printf("%d %d %d\n", write_audio_buf, read_audio_buf, bytes_read);
     }
 }
@@ -189,7 +191,7 @@ static bool display_frame() {
 
             buf_idx += 2;
             if (buf_idx == BUFFER_LEN) {
-                uint next_buf_idx = (read_buf + 1) & 0xF;
+                uint next_buf_idx = (read_buf + 1) & (NUM_BUFFERS - 1);
                 while (next_buf_idx == write_buf) data_starve = true;
                 read_buf = next_buf_idx;
 
@@ -228,7 +230,7 @@ void core1_main() {
 
         while (run_fs) {
             fill_audio_buffer();
-            fill_video_buffer();
+            while (fill_video_buffer() && run_fs);
         }
 
         f_close(&fil);
