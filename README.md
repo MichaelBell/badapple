@@ -5,7 +5,7 @@ To run this first you'll need to acquire the Bad Apple video from somewhere.  I 
 To extract the frames and audio from the video:
 
     ffmpeg -i badapple.mp4 "frames/badapple%04d.png"
-    ffmpeg -i badapple.mp4 -ar 20000 -filter:a "volume=0.5" -acodec pcm_u8 -f u8 badapple-20000-mono.pcm
+    ffmpeg -i badapple.mp4 -ar 44100 -filter:a "volume=0.5" -acodec pcm_s16le -f s16le badapple-44100.pcm
 
 To build the run length encoded video from the extracted frames (this will take a few minutes):
 
