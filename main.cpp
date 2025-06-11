@@ -8,6 +8,12 @@
 #include "pico/sync.h"
 
 #include "hardware/dma.h"
+#include "hardware/vreg.h"
+
+extern "C" {
+#include "sfe_psram.h"
+#include "picow_bt_example_common.h"
+}
 
 using namespace pimoroni;
 
@@ -30,45 +36,26 @@ uint16_t frame_buffer[FRAME_WIDTH * FRAME_HEIGHT];
 ST7701* presto;
 PicoGraphics_PenRGB565* display;
 
-#define NUM_BUFFERS 16
+#define NUM_BUFFERS 512
 #define BUFFER_LEN 1024
 #define BUFFER_BYTES (BUFFER_LEN*2)
-uint16_t buf[NUM_BUFFERS * BUFFER_LEN];
+uint16_t* buf = (uint16_t*)0x11000000;
 volatile uint write_buf;
 volatile uint read_buf;
 uint buf_idx;
 bool data_starve;
+volatile bool got_audio = false;
 
-#define AUDIO_BUFFER_LEN 4096
-uint8_t audio_buf[AUDIO_BUFFER_LEN];
-volatile uint write_audio_buf;
-volatile uint read_audio_buf;
+mutex_t fs_mutex;
 
-#define PWM_AUDIO_PIN 40
-#define PWM_AUDIO_SLICE 8
-#define PWM_AUDIO_CHAN 0
-
-struct repeating_timer audio_timer;
-
-static bool repeating_timer_callback(__unused struct repeating_timer *t) {
-    pwm_set_chan_level(PWM_AUDIO_SLICE, PWM_AUDIO_CHAN, audio_buf[read_audio_buf++]);
-    read_audio_buf &= AUDIO_BUFFER_LEN - 1;
-    return true;
-}
-
-static void audio_init() {
-    pwm_config c = pwm_get_default_config();
-    pwm_config_set_wrap(&c, 0xfe);
-    pwm_init(PWM_AUDIO_SLICE, &c, true);
-    gpio_set_function(PWM_AUDIO_PIN, GPIO_FUNC_PWM);
-}
-
- __attribute__((section(".scratch_x"))) uint8_t deflate_buf[BUFFER_LEN];
+__attribute__((section(".scratch_x"))) uint8_t deflate_buf[BUFFER_LEN];
 struct uzlib_uncomp deflater;
 
 static int deflate_read_cb(struct uzlib_uncomp *uncomp) {
     uint bytes_read;
+    mutex_enter_blocking(&fs_mutex);
     fr = f_read(&fil, deflate_buf, BUFFER_LEN, &bytes_read);
+    mutex_exit(&fs_mutex);
     if (fr != FR_OK) {
         printf("Failed to read data, error: %d\n", fr);
         return -1;
@@ -86,14 +73,18 @@ static int deflate_read_cb(struct uzlib_uncomp *uncomp) {
 }
 
 static void setup_video_decompression() {
+    mutex_enter_blocking(&fs_mutex);
     fr = f_open(&fil, "/badapple480x480-565.bin.gz", FA_READ);
+    mutex_exit(&fs_mutex);
     if (fr != FR_OK) {
         printf("Failed to open badapple video, error: %d\n", fr);
         exit(1);
     }
 
     uint bytes_read;
+    mutex_enter_blocking(&fs_mutex);
     fr = f_read(&fil, deflate_buf, BUFFER_LEN, &bytes_read);
+    mutex_exit(&fs_mutex);
     if (fr != FR_OK) {
         printf("Failed to read data, error: %d\n", fr);
         exit(1);
@@ -147,31 +138,31 @@ static bool fill_video_buffer() {
     return true;
 }
 
-static void fill_audio_buffer() {
-    int bytes_to_write = (read_audio_buf - 1 - write_audio_buf) & (AUDIO_BUFFER_LEN - 1);
-    if (bytes_to_write < 32) return;
+extern "C" void get_audio(int16_t * pcm_buffer, int num_samples_to_write);
 
-    if (write_audio_buf + bytes_to_write >= AUDIO_BUFFER_LEN) {
-        bytes_to_write = AUDIO_BUFFER_LEN - write_audio_buf;
+void get_audio(int16_t * pcm_buffer, int num_samples_to_write) {
+    int bytes_to_write = num_samples_to_write * 4; // 2 bytes per sample, stereo
+    uint8_t* ptr = (uint8_t*)pcm_buffer;
+
+    while (bytes_to_write > 0) {
+        uint bytes_read;
+        mutex_enter_blocking(&fs_mutex);
+        fr = f_read(&audio_file, ptr, bytes_to_write, &bytes_read);
+        mutex_exit(&fs_mutex);
+        if (fr != FR_OK || bytes_read == 0) {
+            printf("Audio read fail\n");
+            memset(ptr, 0, bytes_to_write);
+            return;
+        }
+
+        bytes_to_write -= bytes_read;
+        ptr += bytes_read;
     }
 
-    uint bytes_read;
-    //mutex_enter_blocking(&fs_mutex);
-    fr = f_read(&audio_file, &audio_buf[write_audio_buf], bytes_to_write, &bytes_read);
-    //mutex_exit(&fs_mutex);
-    if (fr != FR_OK || bytes_read == 0) {
-        printf("Audio read fail\n");
-        return;
-    }
-
-    write_audio_buf = (write_audio_buf + bytes_read) & (AUDIO_BUFFER_LEN - 1);
-
-    if (bytes_read > 2000) {
-        printf("%d %d %d\n", write_audio_buf, read_audio_buf, bytes_read);
-    }
+    got_audio = true;
 }
 
-static bool display_frame() {
+static bool __no_inline_not_in_flash_func(display_frame)() {
     uint16_t* ptr = frame_buffer;
     for (int y = 0; y < FRAME_HEIGHT; ++y)
     {
@@ -206,7 +197,6 @@ static bool display_frame() {
 volatile bool run_fs = false;
 
 void core1_main() {
-    audio_init();
     uzlib_init();
 
     presto->init();
@@ -216,33 +206,25 @@ void core1_main() {
         setup_video_decompression();
         fill_video_buffer();
         printf("Video ready\n");
-        fr = f_open(&audio_file, "badapple-20000-mono.pcm", FA_READ);
-        if (fr != FR_OK) {
-            printf("Failed to open badapple audio, error: %d\n", fr);
-            exit(-1);
-        }
-        printf("Audio open\n");
-        write_audio_buf = 0;
-        read_audio_buf = 0;
-        fill_audio_buffer();
-        printf("Audio ready\n");
         multicore_fifo_push_blocking(0);
 
         while (run_fs) {
-            fill_audio_buffer();
             while (fill_video_buffer() && run_fs);
         }
 
         f_close(&fil);
-        f_close(&audio_file);
 
         multicore_fifo_push_blocking(0);
     }
 }
 
 int main() {
+    vreg_set_voltage(VREG_VOLTAGE_1_20);
+    sleep_ms(10);
     set_sys_clock_khz(240000, true);
     stdio_init_all();
+
+    sfe_setup_psram(47);
 
     gpio_init(LCD_CS);
     gpio_put(LCD_CS, 1);
@@ -251,11 +233,26 @@ int main() {
     sleep_ms(5000);
     printf("Hello\n");
 
+    mutex_init(&fs_mutex);
+
     fr = f_mount(&fs, "", 1);
     if (fr != FR_OK) {
       printf("Failed to mount SD card, error: %d\n", fr);
       return 0;
     }
+
+    fr = f_open(&audio_file, "badapple-44100.pcm", FA_READ);
+    if (fr != FR_OK) {
+        printf("Failed to open badapple audio, error: %d\n", fr);
+        exit(-1);
+    }
+
+    int res = picow_bt_example_init();
+    if (res){
+        return -1;
+    }
+
+    picow_bt_example_main();
 
     presto = new ST7701(FRAME_WIDTH, FRAME_HEIGHT, ROTATE_0, SPIPins{spi1, LCD_CS, LCD_CLK, LCD_DAT, PIN_UNUSED, LCD_DC, BACKLIGHT}, frame_buffer);
     display = new PicoGraphics_PenRGB565(FRAME_WIDTH, FRAME_HEIGHT, frame_buffer);
@@ -272,10 +269,10 @@ int main() {
         read_buf = 0;
         buf_idx = 0;
 
+        while (!got_audio);
         run_fs = true;
         multicore_fifo_push_blocking(0);
         multicore_fifo_pop_blocking();
-        add_repeating_timer_us(50, repeating_timer_callback, NULL, &audio_timer);
 
         absolute_time_t start_time = get_absolute_time();
         for (int i = 0; i < 6950; ++i) {
@@ -290,11 +287,10 @@ int main() {
             }
             data_starve = false;
             //presto->update(display);
-            presto->wait_for_vsync();
+            //presto->wait_for_vsync();
             start_time = delayed_by_ms(start_time, (i % 3 == 2) ? 34 : 33);
         }
         run_fs = false;
-        cancel_repeating_timer(&audio_timer);
         multicore_fifo_pop_blocking();
     }
 }

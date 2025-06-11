@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 
 set(PICO_PLATFORM rp2350-arm-s)
-set(PICO_BOARD pimoroni_pico_plus2_rp2350)
+set(PICO_BOARD pimoroni_pico_plus2_w_rp2350)
 
 # Change your executable name to something creative!
 set(NAME badapple) # <-- Name your project/executable here!
@@ -37,6 +37,9 @@ include_directories(${CMAKE_CURRENT_LIST_DIR}/uzlib/src)
 # Add your source files
 add_executable(${NAME}
     main.cpp # <-- Add source files here!
+    a2dp_source_demo.c
+    picow_bt_example_common.c
+    sfe_psram.c
 
     uzlib/src/tinflate.c
     uzlib/src/tinfgzip.c
@@ -46,6 +49,10 @@ add_executable(${NAME}
     uzlib/src/defl_static.c
     uzlib/src/genlz77.c
 )
+
+target_include_directories(${NAME} PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/config
+    )
 
 # Include required libraries
 # This assumes `pimoroni-pico` is stored alongside your project
@@ -64,6 +71,11 @@ target_link_libraries(${NAME}
     sdcard
     fatfs
     hardware_interp
+    pico_btstack_ble
+    pico_btstack_classic
+    pico_btstack_cyw43
+    pico_cyw43_arch_threadsafe_background
+    pico_btstack_sbc_encoder    
 )
 
 target_compile_definitions(${NAME} PRIVATE
@@ -72,7 +84,10 @@ target_compile_definitions(${NAME} PRIVATE
   SDCARD_PIN_SPI0_SCK=34
   SDCARD_PIN_SPI0_MOSI=35
   SDCARD_PIN_SPI0_MISO=36
+  SDCARD_CLK_MHZ=33
   PICO_CLOCK_AJDUST_PERI_CLOCK_WITH_SYS_CLOCK=1
+  CYW43_LWIP=0
+  CYW43_PIO_CLOCK_DIV_INT=3
   )
 
 
