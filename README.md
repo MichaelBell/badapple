@@ -13,4 +13,4 @@ To build the run length encoded video from the extracted frames (this will take 
 
 Gzip the resulting `badapple480x480-565.bin`, and copy `badapple480x480-565.bin.gz` to the root directory of an SD card.
 
-Build the project in the normal way, flash to the Presto, and enjoy!
+Build the project in the normal way, flash to the Presto, put your speaker into pairing mode and enjoy!

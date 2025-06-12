@@ -83,12 +83,6 @@
 
 #define SBC_STORAGE_SIZE 1030
 
-typedef enum {
-    STREAM_SINE = 0,
-    STREAM_MOD,
-    STREAM_PTS_TEST
-} stream_data_source_t;
-    
 typedef struct {
     uint16_t a2dp_cid;
     uint8_t  local_seid;
@@ -185,8 +179,6 @@ static btstack_sbc_encoder_bluedroid_t sbc_encoder_state;
 static uint8_t media_sbc_codec_configuration[4];
 static a2dp_media_sending_context_t media_tracker;
 
-static stream_data_source_t data_source;
-
 static int sine_phase;
 static int current_sample_rate = 44100;
 static int new_sample_rate = 44100;
@@ -201,7 +193,7 @@ typedef struct {
 } avrcp_play_status_info_t;
 
 avrcp_track_t tracks[] = {
-    {{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}, 1, "Sine", "Generated", "A2DP Source Demo", "monotone", 12345, 6789},
+    {{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}, 1, "Bad Apple", "", "", "", 12345, 6789},
 };
 int current_track_index;
 avrcp_play_status_info_t play_info;
@@ -317,8 +309,6 @@ static int a2dp_source_and_avrcp_services_init(void){
     // Register for HCI events.
     hci_event_callback_registration.callback = &hci_packet_handler;
     hci_add_event_handler(&hci_event_callback_registration);
-
-    data_source = STREAM_MOD;
 
     // Parse human readable Bluetooth address.
     sscanf_bd_addr(device_addr_string, device_addr);
@@ -453,7 +443,7 @@ static void dump_sbc_configuration(media_codec_configuration_sbc_t * configurati
     printf("    - bitpool_value [%d, %d] \n", configuration->min_bitpool_value, configuration->max_bitpool_value);
 }
 
-static void a2dp_source_demo_start_scanning(void){
+void a2dp_source_demo_start_scanning(void){
     printf("Start scanning...\n");
     gap_inquiry_start(A2DP_SOURCE_DEMO_INQUIRY_DURATION_1280MS);
     scan_active = true;
@@ -656,7 +646,7 @@ static void a2dp_source_packet_handler(uint8_t packet_type, uint16_t channel, ui
 
             play_info.status = AVRCP_PLAYBACK_STATUS_PLAYING;
             if (media_tracker.avrcp_cid){
-                avrcp_target_set_now_playing_info(media_tracker.avrcp_cid, &tracks[data_source], sizeof(tracks)/sizeof(avrcp_track_t));
+                avrcp_target_set_now_playing_info(media_tracker.avrcp_cid, &tracks[0], sizeof(tracks)/sizeof(avrcp_track_t));
                 avrcp_target_set_playback_status(media_tracker.avrcp_cid, AVRCP_PLAYBACK_STATUS_PLAYING);
             }
             a2dp_demo_timer_start(&media_tracker);

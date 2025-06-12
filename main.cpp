@@ -215,6 +215,8 @@ void core1_main() {
         f_close(&fil);
 
         multicore_fifo_push_blocking(0);
+        got_audio = false;
+        f_rewind(&audio_file);
     }
 }
 
